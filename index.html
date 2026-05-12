@@ -150,7 +150,7 @@
       // 設定休眠時間：21:30 (即 1290 分鐘) 到 07:00 (即 420 分鐘)
       if (currentMinutes >= 1290 || currentMinutes < 420) {
         document.getElementById('page-indicator').innerText = "🌙 目前為非看診時段";
-        document.getElementById('bus-list').innerHTML = "<li class='sleep-mode'>宏昌中醫休息中，公車動態將於早上 7:00 自動恢復更新。</li>";
+        document.getElementById('bus-list').innerHTML = "<li class='sleep-mode'>小巴親子中醫休息中，公車動態將於早上 7:00 自動恢復更新。</li>";
         
         if (carouselTimer) clearInterval(carouselTimer); // 停止翻頁動畫
         return; // 程式在此中斷，絕對不會向政府發送請求！
