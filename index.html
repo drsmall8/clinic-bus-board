@@ -33,12 +33,20 @@
       color: #aaaaaa;
       text-align: center;
       margin-top: 0;
-      margin-bottom: 40px;
+      margin-bottom: 10px;
+    }
+    .page-indicator {
+      text-align: center;
+      font-size: 20px;
+      color: #FFD700;
+      margin-bottom: 20px;
+      font-weight: bold;
     }
     .bus-list {
       list-style: none;
       padding: 0;
       margin: 0;
+      min-height: 550px;
     }
     .bus-list li {
       font-size: 36px;
@@ -62,6 +70,13 @@
       color: #FF5722;
       animation: blink 1.5s infinite;
     }
+    .sleep-mode {
+      justify-content: center !important;
+      color: #aaaaaa;
+      border-left: 8px solid #555555 !important;
+      font-size: 30px !important;
+      text-align: center;
+    }
     @keyframes blink {
       0% { opacity: 1; }
       50% { opacity: 0; }
@@ -69,7 +84,7 @@
     }
     .footer {
       text-align: center;
-      margin-top: 40px;
+      margin-top: 30px;
       font-size: 18px;
       color: #777;
     }
@@ -81,12 +96,15 @@
     <div class="header">
       <h1>🚌 小巴親子中醫 - 候診專屬公車動態</h1>
       <p>站牌位置：板橋花市站 (民生路二段)</p>
+      <div id="page-indicator" class="page-indicator">資料載入中...</div>
     </div>
+    
     <ul id="bus-list" class="bus-list">
       <li>載入中，請稍候...</li>
     </ul>
+    
     <div class="footer">
-      資料來源：交通部 TDX 運輸資料流通服務 | 系統每 60 秒自動更新
+      資料來源：交通部 TDX 運輸資料流通服務 | 系統自動更新與翻頁
     </div>
   </div>
 
@@ -95,6 +113,15 @@
     const clientId = 'drsmall8.tcm-2ae397bc-9524-4141';
     const clientSecret = '1ca9badf-6dbe-47b4-8b41-4dfeceb4138c';
 
+    // 輪播設定參數
+    const itemsPerPage = 6; // 每一頁顯示 6 台公車
+    const flipInterval = 10000; // 每 10 秒翻一頁
+    
+    let allBuses = []; 
+    let currentPage = 0; 
+    let carouselTimer = null; 
+
+    // 1. 取得 Token
     async function getToken() {
       const authUrl = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token";
       const params = new URLSearchParams();
@@ -114,34 +141,78 @@
       }
     }
 
+    // 2. 向 TDX 抓取資料 (加入時間鎖)
     async function getBusData() {
+      // ===== 時間鎖邏輯開始 =====
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      
+      // 設定休眠時間：21:30 (即 1290 分鐘) 到 07:00 (即 420 分鐘)
+      if (currentMinutes >= 1290 || currentMinutes < 420) {
+        document.getElementById('page-indicator').innerText = "🌙 目前為非看診時段";
+        document.getElementById('bus-list').innerHTML = "<li class='sleep-mode'>宏昌中醫休息中，公車動態將於早上 7:00 自動恢復更新。</li>";
+        
+        if (carouselTimer) clearInterval(carouselTimer); // 停止翻頁動畫
+        return; // 程式在此中斷，絕對不會向政府發送請求！
+      }
+      // ===== 時間鎖邏輯結束 =====
+
+      // 如果在營業時間內，才會繼續往下執行拿 Token 和資料
       const token = await getToken();
       if (!token) return;
+      
       const apiUrl = "https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/NewTaipei?$filter=StopName%2FZh_tw%20eq%20'%E6%9D%BF%E6%A9%8B%E8%8A%B1%E5%B8%82'&$orderby=RouteName%2FZh_tw&$format=JSON";
+      
       try {
         const response = await fetch(apiUrl, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const data = await response.json();
-        renderBusData(data);
+        const rawData = await response.json();
+        
+        allBuses = [];
+        rawData.forEach(bus => {
+          let time = bus.EstimateTime;
+          let status = bus.StopStatus;
+          if (status === 0 || status === 1) {
+            allBuses.push(bus);
+          }
+        });
+
+        currentPage = 0;
+        displayPage();
+        startCarousel();
+
       } catch (error) {
         console.error("資料獲取失敗", error);
       }
     }
 
-    function renderBusData(data) {
+    // 3. 畫到螢幕上
+    function displayPage() {
       const container = document.getElementById('bus-list');
+      const indicator = document.getElementById('page-indicator');
       container.innerHTML = '';
-      if(data.length === 0) {
+
+      if(allBuses.length === 0) {
          container.innerHTML = '<li>目前無公車資訊</li>';
+         indicator.innerText = '';
          return;
       }
+
+      const totalPages = Math.ceil(allBuses.length / itemsPerPage);
+      const startIdx = currentPage * itemsPerPage;
+      const endIdx = startIdx + itemsPerPage;
+      const pageData = allBuses.slice(startIdx, endIdx);
+
+      indicator.innerText = `第 ${currentPage + 1} 頁 / 共 ${totalPages} 頁 (每10秒切換)`;
+
       let html = '';
-      data.forEach(bus => {
+      pageData.forEach(bus => {
         let routeName = bus.RouteName.Zh_tw;
+        let direction = bus.Direction === 0 ? "去程" : "回程";
         let time = bus.EstimateTime;
         let status = bus.StopStatus;
-        let direction = bus.Direction === 0 ? "去程" : "回程";
+        
         let timeText = "";
         if (status === 0 && time !== undefined) {
            let mins = Math.floor(time / 60);
@@ -153,20 +224,36 @@
         } else if (status === 1) {
            timeText = "<span class='time'>尚未發車</span>";
         }
-        if (timeText !== "" && status !== 3) {
-            html += `<li>
-                       <span class="route-name">${routeName}</span> 
-                       <span style="font-size: 20px; color: #888;">(${direction})</span>
-                       ${timeText}
-                     </li>`;
-        }
+
+        html += `<li>
+                   <span class="route-name">${routeName}</span> 
+                   <span style="font-size: 20px; color: #888;">(${direction})</span>
+                   ${timeText}
+                 </li>`;
       });
-      if(html === '') html = '<li>目前暫無即將進站的公車</li>';
       container.innerHTML = html;
     }
 
+    // 4. 控制自動翻頁
+    function startCarousel() {
+      if (carouselTimer) clearInterval(carouselTimer);
+      const totalPages = Math.ceil(allBuses.length / itemsPerPage);
+      if (totalPages > 1) {
+        carouselTimer = setInterval(() => {
+          currentPage++; 
+          if (currentPage >= totalPages) {
+            currentPage = 0; 
+          }
+          displayPage();
+        }, flipInterval);
+      }
+    }
+
+    // 啟動程式！
     getBusData();
-    setInterval(getBusData, 60000);
+    
+    // 設定每 60 秒抓取一次 (有了時間鎖保護，就算調成 1 分鐘更新一次也夠用了！)
+    setInterval(getBusData, 60000); 
   </script>
 </body>
 </html>
